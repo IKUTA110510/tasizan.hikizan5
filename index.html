@@ -60,6 +60,25 @@
             aspect-ratio: 5 / 7;
         }
 
+        /* ずかん用：iOS等でのグリッド崩れを防止する比率固定枠 */
+        .card-aspect-slot {
+            position: relative;
+            width: 100%;
+            padding-bottom: 140%; /* 5:7 の比率 (7/5 = 1.40) */
+            height: 0;
+            overflow: hidden;
+            border-radius: 1rem;
+        }
+        .card-aspect-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+        }
+
         /* ブロックアニメーション */
         .slide-in-right-slow {
             animation: slideInRightSlow 1.2s cubic-bezier(0.25, 1, 0.5, 1) both;
@@ -308,7 +327,7 @@
 
                     <label class="flex items-center justify-between p-2 rounded-xl border-2 border-slate-200 hover:border-emerald-300 bg-slate-50 cursor-pointer transition">
                         <div class="flex items-center min-w-0">
-                            <input type="checkbox" value="2" class="level-cb w-4 h-4 text-emerald-600 rounded focus:ring-emerald-400 flex-shrink-0" checked>
+                            <input type="checkbox" value="2" class="level-cb w-4 h-4 text-emerald-600 rounded focus:ring-emerald-400 flex-shrink-0">
                             <div class="ml-2 min-w-0">
                                 <div class="font-extrabold text-slate-800 text-xs truncate">レベル2：10までの ひきざん</div>
                                 <div class="text-[9px] text-slate-500 truncate">くりさがり なし (8-2)</div>
@@ -495,7 +514,7 @@
                     <span id="libraryRatio" class="font-black text-amber-600 text-sm">0 / 12</span>
                 </div>
 
-                <div id="libraryCardGrid" class="grid grid-cols-3 gap-2 py-1 max-h-[50dvh] overflow-y-auto pr-1">
+                <div id="libraryCardGrid" class="grid grid-cols-3 gap-2.5 py-1 max-h-[50dvh] overflow-y-auto pr-1 items-start">
                 </div>
             </div>
 
@@ -1372,7 +1391,6 @@
             playSound('click');
         };
 
-        /* ゲットしたカードのリセット処理 */
         window.openResetObtainedModal = function() {
             document.getElementById('resetObtainedConfirmModal').classList.remove('hidden');
             playSound('click');
@@ -1598,7 +1616,6 @@
             playSound('click');
         };
 
-        /* ふっかつのじゅもん（ユーザー名＆保護者登録情報のみ対象） */
         window.openSpellModal = function() {
             document.getElementById('spellModal').classList.remove('hidden');
             switchSpellTab('export');
@@ -1637,7 +1654,12 @@
             }));
         }
 
-        /* じゅもん作成（ゲットしたカード情報も追加） */
+        function decodeUtf8Base64(str) {
+            return decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+        }
+
         async function generateSpellText() {
             try {
                 const area = document.getElementById('spellOutputArea');
@@ -1684,7 +1706,6 @@
             }
         };
 
-        /* じゅもん適用（ゲットしたカード情報も復元・統合） */
         window.applySpell = function() {
             const inputVal = document.getElementById('spellInputArea').value.trim();
             if (!inputVal) {
@@ -1704,10 +1725,8 @@
                     throw new Error("Invalid spell format");
                 }
 
-                // ユーザー名の復元
                 if (data.userName) window.appUserData.userName = data.userName;
                 
-                // 獲得済みカードIDの統合・復元
                 if (Array.isArray(data.obtainedCardIds)) {
                     const combinedSet = new Set([
                         ...(window.appUserData.obtainedCardIds || []),
@@ -1716,7 +1735,6 @@
                     window.appUserData.obtainedCardIds = Array.from(combinedSet);
                 }
 
-                // 保護者が作ったカスタムカードの復元・統合
                 if (Array.isArray(data.customCards)) {
                     if (!window.appUserData.customCards) window.appUserData.customCards = [];
                     const existingIds = new Set(window.appUserData.customCards.map(c => String(c.id)));
@@ -1727,7 +1745,6 @@
                     });
                 }
 
-                // 保護者が削除した初期カード情報の統合
                 if (Array.isArray(data.deletedDefaultCardIds)) {
                     if (!window.appUserData.deletedDefaultCardIds) window.appUserData.deletedDefaultCardIds = [];
                     const delSet = new Set([
@@ -1782,47 +1799,57 @@
             grid.innerHTML = '';
 
             const allCards = getAllCards();
-            const obtainedSet = new Set(window.appUserData.obtainedCardIds || []);
+            const obtainedSet = new Set((window.appUserData.obtainedCardIds || []).map(id => String(id)));
 
             allCards.forEach(card => {
-                const isObtained = obtainedSet.has(card.id);
-                const cardEl = document.createElement('div');
+                const isObtained = obtainedSet.has(String(card.id));
+                
+                // カード用グリッドセル（縦幅固定ラッパー）
+                const slot = document.createElement('div');
+                slot.className = 'card-aspect-slot shadow-sm border-2 rounded-2xl';
 
                 if (isObtained) {
-                    cardEl.className = `rounded-2xl p-1.5 border-2 ${card.color} text-white text-center cursor-pointer transform hover:scale-105 transition shadow-sm relative overflow-hidden flex flex-col items-center justify-between card-aspect`;
-                    cardEl.onclick = () => openFullCardModal(card);
+                    slot.classList.add(...card.color.split(' '));
+                    slot.classList.add('cursor-pointer', 'transform', 'hover:scale-105', 'transition');
+                    slot.onclick = () => openFullCardModal(card);
 
                     let visualContent = '';
                     if (card.isFullImage && card.image) {
                         visualContent = `<img src="${card.image}" class="w-full h-full object-cover rounded-xl absolute inset-0">`;
                     } else if (card.image) {
-                        visualContent = `<img src="${card.image}" class="w-12 h-12 object-contain rounded-lg my-auto bg-white/20 p-0.5 z-10">`;
+                        visualContent = `<img src="${card.image}" class="w-10 h-10 sm:w-12 sm:h-12 object-contain rounded-lg my-auto bg-white/20 p-0.5 z-10">`;
                     } else {
-                        visualContent = `<div class="text-3xl my-auto z-10">${card.emoji}</div>`;
+                        visualContent = `<div class="text-2xl sm:text-3xl my-auto z-10">${card.emoji}</div>`;
                     }
 
                     if (card.isFullImage) {
-                        cardEl.innerHTML = `
-                            ${visualContent}
-                            <div class="card-shine absolute inset-0 pointer-events-none z-10"></div>
+                        slot.innerHTML = `
+                            <div class="card-aspect-content flex flex-col justify-between items-center p-1 text-white text-center relative">
+                                ${visualContent}
+                                <div class="card-shine absolute inset-0 pointer-events-none z-10"></div>
+                            </div>
                         `;
                     } else {
-                        cardEl.innerHTML = `
-                            <div class="card-shine absolute inset-0 pointer-events-none"></div>
-                            <span class="text-[8px] font-black bg-black/30 px-1.5 py-0.2 rounded-full z-10">${card.rarity}</span>
-                            ${visualContent}
-                            <div class="text-[10px] font-extrabold truncate w-full z-10">${card.name}</div>
+                        slot.innerHTML = `
+                            <div class="card-aspect-content flex flex-col justify-between items-center p-1.5 text-white text-center relative overflow-hidden">
+                                <div class="card-shine absolute inset-0 pointer-events-none"></div>
+                                <span class="text-[8px] font-black bg-black/30 px-1.5 py-0.2 rounded-full z-10 flex-shrink-0">${card.rarity}</span>
+                                ${visualContent}
+                                <div class="text-[9px] sm:text-[10px] font-extrabold truncate w-full z-10 flex-shrink-0">${card.name}</div>
+                            </div>
                         `;
                     }
                 } else {
-                    cardEl.className = `rounded-2xl p-2 border-2 border-slate-200 bg-slate-100 text-slate-400 text-center flex flex-col items-center justify-between card-aspect opacity-70`;
-                    cardEl.innerHTML = `
-                        <span class="text-[8px] font-bold bg-slate-200 px-1.5 py-0.2 rounded-full">???</span>
-                        <div class="text-3xl my-auto filter grayscale opacity-40">❓</div>
-                        <div class="text-[10px] font-bold truncate w-full">???</div>
+                    slot.classList.add('border-slate-200', 'bg-slate-100', 'text-slate-400', 'opacity-70');
+                    slot.innerHTML = `
+                        <div class="card-aspect-content flex flex-col justify-between items-center p-1.5 text-center">
+                            <span class="text-[8px] font-bold bg-slate-200 px-1.5 py-0.2 rounded-full flex-shrink-0">???</span>
+                            <div class="text-2xl sm:text-3xl my-auto filter grayscale opacity-40">❓</div>
+                            <div class="text-[9px] sm:text-[10px] font-bold truncate w-full flex-shrink-0">???</div>
+                        </div>
                     `;
                 }
-                grid.appendChild(cardEl);
+                grid.appendChild(slot);
             });
 
             document.getElementById('libraryRatio').innerText = `${obtainedSet.size} / ${allCards.length}`;
@@ -1895,8 +1922,8 @@
                 rewardBtn.classList.remove('hidden');
                 
                 const allCards = getAllCards();
-                const obtained = new Set(window.appUserData.obtainedCardIds || []);
-                const unobtainedCards = allCards.filter(c => !obtained.has(c.id));
+                const obtained = new Set((window.appUserData.obtainedCardIds || []).map(id => String(id)));
+                const unobtainedCards = allCards.filter(c => !obtained.has(String(c.id)));
                 
                 if (unobtainedCards.length > 0) {
                     lastEarnedCard = getRandomCardByRarity(unobtainedCards);
@@ -1904,7 +1931,7 @@
                     lastEarnedCard = getRandomCardByRarity(allCards);
                 }
 
-                if (lastEarnedCard && !obtained.has(lastEarnedCard.id)) {
+                if (lastEarnedCard && !obtained.has(String(lastEarnedCard.id))) {
                     if (!window.appUserData.obtainedCardIds) window.appUserData.obtainedCardIds = [];
                     window.appUserData.obtainedCardIds.push(lastEarnedCard.id);
                 }
