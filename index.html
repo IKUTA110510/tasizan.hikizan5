@@ -846,7 +846,6 @@
                     if (data.levelStats) window.appUserData.levelStats = data.levelStats;
                     if (data.obtainedCardIds) window.appUserData.obtainedCardIds = data.obtainedCardIds;
                     
-                    // クラウド同期時、ローカルの画像付きカードが空データで消されないよう保護マージ
                     if (Array.isArray(data.customCards)) {
                         const localCustoms = window.appUserData.customCards || [];
                         const localMap = new Map(localCustoms.map(c => [String(c.id), c]));
@@ -918,6 +917,28 @@
             { id: 11, name: "ゆめいろユニコーン", emoji: "🦄🌈", rarity: "SSR", desc: "にじの かなたに すむ でんせつの ユニコーン！", color: "card-rare-SSR" },
             { id: 12, name: "ぎんがのロケット", emoji: "🚀🌌", rarity: "SR", desc: "うちゅうを ぼうけんする かっこいい ロケット！", color: "card-rare-SR" }
         ];
+
+        /* カードプロパティの安全正規化関数（プロパティ欠落による青塗り・例外を徹底防止） */
+        function getNormalizedCard(card) {
+            if (!card) return null;
+            const rarity = card.rarity || 'R';
+            const colorMap = {
+                'SSR': 'card-rare-SSR',
+                'SR': 'card-rare-SR',
+                'R': 'card-rare-R'
+            };
+            return {
+                id: card.id,
+                name: card.name || 'カード',
+                emoji: card.emoji || '🃏',
+                rarity: rarity,
+                desc: card.desc || '',
+                color: card.color || colorMap[rarity] || 'card-rare-R',
+                image: card.image || null,
+                isCustom: !!card.isCustom,
+                isFullImage: !!card.isFullImage
+            };
+        }
 
         function showToast(msg) {
             let toast = document.getElementById('customToast');
@@ -1448,12 +1469,14 @@
                 return;
             }
 
-            allCards.forEach(card => {
+            allCards.forEach(rawCard => {
+                const card = getNormalizedCard(rawCard);
                 const item = document.createElement('div');
                 item.className = `flex items-center justify-between p-2 rounded-xl border bg-white shadow-2xs`;
                 
                 const visual = card.image 
-                    ? `<img src="${card.image}" class="w-9 h-9 object-contain rounded-lg border bg-slate-50 flex-shrink-0">`
+                    ? `<img src="${card.image}" onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');" class="w-9 h-9 object-contain rounded-lg border bg-slate-50 flex-shrink-0">
+                       <div class="hidden text-xl w-9 h-9 flex items-center justify-center bg-slate-100 rounded-lg flex-shrink-0">${card.emoji}</div>`
                     : `<div class="text-xl w-9 h-9 flex items-center justify-center bg-slate-100 rounded-lg flex-shrink-0">${card.emoji}</div>`;
 
                 const typeBadge = card.isCustom 
@@ -1468,7 +1491,7 @@
                                 <span class="truncate">${card.name}</span>
                                 ${typeBadge}
                             </div>
-                            <div class="text-[9px] text-slate-500 truncate">${card.rarity} - ${card.desc}</div>
+                            <div class="text-[9px] text-slate-500 truncate">${card.rarity} - ${card.desc || ''}</div>
                         </div>
                     </div>
                     <button onclick="promptDeleteCard('${card.id}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 text-[10px] font-bold px-2.5 py-1 rounded-lg ml-2 flex-shrink-0">
@@ -1514,7 +1537,8 @@
                     image: compressedDataUrl,
                     color: colorMap[rarityInput] || 'card-rare-R',
                     isCustom: true,
-                    isFullImage: isFullImage
+                    isFullImage: isFullImage,
+                    emoji: '🌟'
                 };
 
                 if (!window.appUserData.customCards) window.appUserData.customCards = [];
@@ -1536,46 +1560,48 @@
             }
         };
 
-        /* 画像を超軽量化圧縮する処理 (容量制限オーバーによる青塗り化防止) */
+        /* 画像を超軽量化圧縮する処理 */
         function processCardImage(file, isFullImage = false) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const img = new Image();
                     img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        // 超軽量カードサイズ (150x210, 約10~15KB)
-                        const targetW = 150;
-                        const targetH = 210;
+                        try {
+                            const canvas = document.createElement('canvas');
+                            const targetW = 150;
+                            const targetH = 210;
 
-                        canvas.width = targetW;
-                        canvas.height = targetH;
-                        const ctx = canvas.getContext('2d');
+                            canvas.width = targetW;
+                            canvas.height = targetH;
+                            const ctx = canvas.getContext('2d');
 
-                        if (isFullImage) {
-                            ctx.fillStyle = '#1e293b';
-                            ctx.fillRect(0, 0, targetW, targetH);
-                            
-                            const scale = Math.min(targetW / img.width, targetH / img.height);
-                            const x = (targetW - img.width * scale) / 2;
-                            const y = (targetH - img.height * scale) / 2;
-                            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
-                        } else {
-                            let w = img.width;
-                            let h = img.height;
-                            const maxDim = 120;
-                            if (w > h) {
-                                if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+                            if (isFullImage) {
+                                ctx.fillStyle = '#1e293b';
+                                ctx.fillRect(0, 0, targetW, targetH);
+                                
+                                const scale = Math.min(targetW / img.width, targetH / img.height);
+                                const x = (targetW - img.width * scale) / 2;
+                                const y = (targetH - img.height * scale) / 2;
+                                ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
                             } else {
-                                if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+                                let w = img.width;
+                                let h = img.height;
+                                const maxDim = 120;
+                                if (w > h) {
+                                    if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+                                } else {
+                                    if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+                                }
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fillRect(0, 0, targetW, targetH);
+                                ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
                             }
-                            ctx.fillStyle = '#ffffff';
-                            ctx.fillRect(0, 0, targetW, targetH);
-                            ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
-                        }
 
-                        // 品質0.45で超軽量圧縮
-                        resolve(canvas.toDataURL('image/jpeg', 0.45));
+                            resolve(canvas.toDataURL('image/jpeg', 0.45));
+                        } catch (err) {
+                            resolve(e.target.result);
+                        }
                     };
                     img.onerror = reject;
                     img.src = e.target.result;
@@ -1593,35 +1619,39 @@
                 }
                 const img = new Image();
                 img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const targetW = 150;
-                    const targetH = 210;
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const targetW = 150;
+                        const targetH = 210;
 
-                    canvas.width = targetW;
-                    canvas.height = targetH;
-                    const ctx = canvas.getContext('2d');
+                        canvas.width = targetW;
+                        canvas.height = targetH;
+                        const ctx = canvas.getContext('2d');
 
-                    if (isFullImage) {
-                        ctx.fillStyle = '#1e293b';
-                        ctx.fillRect(0, 0, targetW, targetH);
-                        const scale = Math.min(targetW / img.width, targetH / img.height);
-                        const x = (targetW - img.width * scale) / 2;
-                        const y = (targetH - img.height * scale) / 2;
-                        ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
-                    } else {
-                        let w = img.width;
-                        let h = img.height;
-                        const maxDim = 120;
-                        if (w > h) {
-                            if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+                        if (isFullImage) {
+                            ctx.fillStyle = '#1e293b';
+                            ctx.fillRect(0, 0, targetW, targetH);
+                            const scale = Math.min(targetW / img.width, targetH / img.height);
+                            const x = (targetW - img.width * scale) / 2;
+                            const y = (targetH - img.height * scale) / 2;
+                            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
                         } else {
-                            if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+                            let w = img.width;
+                            let h = img.height;
+                            const maxDim = 120;
+                            if (w > h) {
+                                if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+                            } else {
+                                if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+                            }
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, targetW, targetH);
+                            ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
                         }
-                        ctx.fillStyle = '#ffffff';
-                        ctx.fillRect(0, 0, targetW, targetH);
-                        ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', 0.45));
+                    } catch (e) {
+                        resolve(dataUrl);
                     }
-                    resolve(canvas.toDataURL('image/jpeg', 0.45));
                 };
                 img.onerror = () => resolve(dataUrl);
                 img.src = dataUrl;
@@ -1633,7 +1663,8 @@
         window.promptDeleteCard = function(cardId) {
             pendingDeleteCardId = cardId;
             const allCards = getAllCards();
-            const card = allCards.find(c => String(c.id) === String(cardId));
+            const rawCard = allCards.find(c => String(c.id) === String(cardId));
+            const card = getNormalizedCard(rawCard);
             const name = card ? card.name : "このカード";
             document.getElementById('deleteCardNameText').innerText = `「${name}」`;
             document.getElementById('deleteConfirmModal').classList.remove('hidden');
@@ -1826,72 +1857,87 @@
 
         window.openLibraryModal = function() {
             const grid = document.getElementById('libraryCardGrid');
+            if (!grid) return;
             grid.innerHTML = '';
 
             const allCards = getAllCards();
             const obtainedSet = new Set((window.appUserData.obtainedCardIds || []).map(id => String(id)));
 
-            allCards.forEach(card => {
+            allCards.forEach(rawCard => {
+                const card = getNormalizedCard(rawCard);
                 const isObtained = obtainedSet.has(String(card.id));
                 
-                // カード用グリッドセル（縦幅固定ラッパー）
                 const slot = document.createElement('div');
-                slot.className = 'card-aspect-slot shadow-sm border-2 rounded-2xl overflow-hidden';
+                slot.className = 'card-aspect-slot shadow-sm border-2 rounded-2xl overflow-hidden transition-all duration-300';
 
                 if (isObtained) {
-                    slot.classList.add(...card.color.split(' '));
-                    slot.classList.add('cursor-pointer', 'transform', 'hover:scale-105', 'transition');
+                    const colorClasses = (card.color || 'card-rare-R').split(' ').filter(Boolean);
+                    slot.classList.add(...colorClasses);
+                    slot.classList.add('cursor-pointer', 'transform', 'hover:scale-105', 'active:scale-95');
                     slot.onclick = () => openFullCardModal(card);
 
-                    if (card.image) {
-                        // 画像つきカード（画像エラー時も文字やフォールバックが表示される安全設計）
-                        if (card.isFullImage) {
-                            slot.innerHTML = `
-                                <div class="card-aspect-content flex flex-col justify-between items-center relative overflow-hidden rounded-2xl bg-slate-800">
-                                    <img src="${card.image}" onerror="this.style.display='none';" class="w-full h-full object-cover absolute inset-0 z-0">
-                                    <div class="w-full flex justify-between items-center p-1 z-10">
-                                        <span class="text-[8px] font-black bg-black/60 backdrop-blur-xs text-white px-1.5 py-0.2 rounded-full">${card.rarity}</span>
-                                    </div>
-                                    <div class="w-full bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1 pt-3 z-10 text-center">
-                                        <div class="text-[9px] sm:text-[10px] font-extrabold truncate w-full text-white drop-shadow">${card.name}</div>
-                                    </div>
-                                    <div class="card-shine absolute inset-0 pointer-events-none z-20"></div>
-                                </div>
-                            `;
-                        } else {
-                            slot.innerHTML = `
-                                <div class="card-aspect-content flex flex-col justify-between items-center relative overflow-hidden rounded-2xl p-1">
-                                    <div class="w-full flex justify-between items-center z-10">
-                                        <span class="text-[8px] font-black bg-black/40 backdrop-blur-xs text-white px-1.5 py-0.2 rounded-full">${card.rarity}</span>
-                                    </div>
-                                    <div class="my-auto relative w-12 h-12 flex items-center justify-center z-10">
-                                        <img src="${card.image}" onerror="this.style.display='none';" class="w-full h-full object-contain rounded-lg bg-white/30 p-0.5 shadow-xs">
-                                    </div>
-                                    <div class="w-full bg-black/40 backdrop-blur-xs p-0.5 rounded-lg z-10 text-center">
-                                        <div class="text-[9px] sm:text-[10px] font-extrabold truncate w-full text-white drop-shadow">${card.name}</div>
-                                    </div>
-                                    <div class="card-shine absolute inset-0 pointer-events-none z-20"></div>
-                                </div>
-                            `;
-                        }
-                    } else {
-                        // 絵文字カード（初期カード）
+                    if (card.isFullImage && card.image) {
+                        // ★トレカ画像そのままモード
                         slot.innerHTML = `
-                            <div class="card-aspect-content flex flex-col justify-between items-center p-1.5 text-white text-center relative overflow-hidden rounded-2xl">
-                                <div class="card-shine absolute inset-0 pointer-events-none"></div>
-                                <span class="text-[8px] font-black bg-black/30 px-1.5 py-0.2 rounded-full z-10 flex-shrink-0">${card.rarity}</span>
-                                <div class="text-2xl sm:text-3xl my-auto z-10">${card.emoji || '🃏'}</div>
-                                <div class="text-[9px] sm:text-[10px] font-extrabold truncate w-full z-10 flex-shrink-0">${card.name}</div>
+                            <div class="card-aspect-content flex flex-col justify-between items-center relative overflow-hidden rounded-2xl bg-slate-800">
+                                <img src="${card.image}" 
+                                     onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');" 
+                                     class="w-full h-full object-cover absolute inset-0 z-0">
+                                <div class="hidden absolute inset-0 z-0 flex flex-col items-center justify-center p-2 text-center text-white ${card.color}">
+                                    <div class="text-3xl mb-1">${card.emoji}</div>
+                                    <div class="text-[10px] font-extrabold truncate w-full">${card.name}</div>
+                                </div>
+                                <div class="w-full flex justify-between items-center p-1.5 z-10">
+                                    <span class="text-[9px] font-black bg-black/60 backdrop-blur-xs text-white px-2 py-0.5 rounded-full shadow-xs">${card.rarity}</span>
+                                </div>
+                                <div class="w-full bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1.5 pt-4 z-10 text-center">
+                                    <div class="text-[10px] font-black truncate w-full text-white drop-shadow-md">${card.name}</div>
+                                </div>
+                                <div class="card-shine absolute inset-0 pointer-events-none z-20"></div>
+                            </div>
+                        `;
+                    } else if (card.image) {
+                        // 通常画像つきモード
+                        slot.innerHTML = `
+                            <div class="card-aspect-content flex flex-col justify-between items-center relative overflow-hidden rounded-2xl p-1.5 text-white">
+                                <div class="w-full flex justify-between items-center z-10">
+                                    <span class="text-[9px] font-black bg-black/40 backdrop-blur-xs text-white px-2 py-0.5 rounded-full shadow-xs">${card.rarity}</span>
+                                </div>
+                                <div class="my-auto relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center z-10">
+                                    <img src="${card.image}" 
+                                         onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');" 
+                                         class="w-full h-full object-contain rounded-xl bg-white/20 p-1 shadow-xs border border-white/30">
+                                    <div class="hidden text-3xl text-center">${card.emoji}</div>
+                                </div>
+                                <div class="w-full bg-black/40 backdrop-blur-xs p-1 rounded-xl z-10 text-center border border-white/20">
+                                    <div class="text-[10px] font-black truncate w-full text-white drop-shadow-md">${card.name}</div>
+                                </div>
+                                <div class="card-shine absolute inset-0 pointer-events-none z-20"></div>
+                            </div>
+                        `;
+                    } else {
+                        // 絵文字モード（標準カード）
+                        slot.innerHTML = `
+                            <div class="card-aspect-content flex flex-col justify-between items-center p-2 text-white text-center relative overflow-hidden rounded-2xl">
+                                <div class="card-shine absolute inset-0 pointer-events-none z-0"></div>
+                                <div class="w-full flex justify-between items-center z-10">
+                                    <span class="text-[9px] font-black bg-black/30 backdrop-blur-xs px-2 py-0.5 rounded-full shadow-xs">${card.rarity}</span>
+                                </div>
+                                <div class="text-3xl sm:text-4xl my-auto z-10 drop-shadow-md transform transition hover:scale-110">${card.emoji}</div>
+                                <div class="w-full bg-black/30 backdrop-blur-xs p-1 rounded-xl z-10 text-center border border-white/20">
+                                    <div class="text-[10px] font-black truncate w-full text-white drop-shadow-md">${card.name}</div>
+                                </div>
                             </div>
                         `;
                     }
                 } else {
-                    slot.classList.add('border-slate-200', 'bg-slate-100', 'text-slate-400', 'opacity-70');
+                    // 未獲得カード
+                    slot.classList.add('border-slate-200', 'bg-slate-100', 'text-slate-400', 'opacity-60');
                     slot.innerHTML = `
-                        <div class="card-aspect-content flex flex-col justify-between items-center p-1.5 text-center">
-                            <span class="text-[8px] font-bold bg-slate-200 px-1.5 py-0.2 rounded-full flex-shrink-0">???</span>
-                            <div class="text-2xl sm:text-3xl my-auto filter grayscale opacity-40">❓</div>
-                            <div class="text-[9px] sm:text-[10px] font-bold truncate w-full flex-shrink-0">???</div>
+                        <div class="card-aspect-content flex flex-col justify-between items-center p-2 text-center relative overflow-hidden">
+                            <span class="text-[8px] font-bold bg-slate-200 text-slate-500 px-1.5 py-0.2 rounded-full flex-shrink-0">???</span>
+                            <div class="text-3xl sm:text-4xl my-auto filter grayscale opacity-40">❓</div>
+                            <div class="text-[9px] font-bold truncate w-full flex-shrink-0 text-slate-400">???</div>
                         </div>
                     `;
                 }
@@ -1908,29 +1954,36 @@
             playSound('click');
         };
 
-        function openFullCardModal(card) {
+        function openFullCardModal(rawCard) {
+            const card = getNormalizedCard(rawCard);
             const inner = document.getElementById('fullCardInner');
             inner.className = `relative rounded-3xl p-4 border-4 shadow-2xl text-center text-white overflow-hidden w-60 sm:w-64 card-aspect flex flex-col justify-between items-center ${card.color}`;
             
             if (card.isFullImage && card.image) {
                 inner.innerHTML = `
-                    <img src="${card.image}" class="absolute inset-0 w-full h-full object-cover">
+                    <img src="${card.image}" onerror="this.style.display='none';" class="absolute inset-0 w-full h-full object-cover">
                     <div class="card-shine absolute inset-0 pointer-events-none z-10"></div>
+                    <div class="inline-block bg-black/40 backdrop-blur-xs text-white text-xs font-black px-3 py-1 rounded-full z-10 shadow-xs">
+                        ${card.rarity} CARD
+                    </div>
+                    <div class="w-full z-10">
+                        <h3 class="text-lg font-black mb-1 drop-shadow-md">${card.name}</h3>
+                    </div>
                 `;
             } else {
                 const visualContent = card.image 
-                    ? `<img src="${card.image}" class="w-28 h-28 object-contain mx-auto my-auto rounded-2xl shadow-md bg-white/20 p-1.5 z-10">`
-                    : `<div class="text-6xl my-auto bounce-animation z-10">${card.emoji}</div>`;
+                    ? `<img src="${card.image}" onerror="this.onerror=null; this.src='https://placehold.co/120x120/e2e8f0/475569?text=🖼️';" class="w-28 h-28 object-contain mx-auto my-auto rounded-2xl shadow-md bg-white/20 p-1.5 z-10 border border-white/30">`
+                    : `<div class="text-6xl my-auto bounce-animation z-10 drop-shadow-md">${card.emoji}</div>`;
 
                 inner.innerHTML = `
                     <div class="card-shine absolute inset-0 pointer-events-none"></div>
-                    <div class="inline-block bg-black/30 text-white text-xs font-black px-3 py-1 rounded-full z-10 shadow-xs">
+                    <div class="inline-block bg-black/30 backdrop-blur-xs text-white text-xs font-black px-3 py-1 rounded-full z-10 shadow-xs">
                         ${card.rarity} CARD
                     </div>
                     ${visualContent}
                     <div class="w-full z-10">
                         <h3 class="text-lg font-black mb-1 drop-shadow-md">${card.name}</h3>
-                        <p class="text-[11px] font-bold bg-white/20 p-2 rounded-xl backdrop-blur-xs border border-white/30 leading-snug">
+                        <p class="text-[11px] font-bold bg-white/20 p-2 rounded-xl backdrop-blur-xs border border-white/30 leading-snug drop-shadow-xs">
                             ${card.desc}
                         </p>
                     </div>
@@ -2004,21 +2057,25 @@
         window.openGetCardModal = function() {
             if (!lastEarnedCard) return;
 
-            const card = lastEarnedCard;
+            const card = getNormalizedCard(lastEarnedCard);
             const disp = document.getElementById('getCardDisplay');
 
             let cardContent = '';
             if (card.isFullImage && card.image) {
                 cardContent = `
                     <div class="rounded-3xl p-4 border-4 shadow-xl text-center text-white relative overflow-hidden card-aspect w-52 sm:w-56 mx-auto flex flex-col justify-between items-center ${card.color}">
-                        <img src="${card.image}" class="absolute inset-0 w-full h-full object-cover">
+                        <img src="${card.image}" onerror="this.style.display='none';" class="absolute inset-0 w-full h-full object-cover">
                         <div class="card-shine absolute inset-0 pointer-events-none z-10"></div>
+                        <span class="text-xs font-black bg-black/40 px-3 py-1 rounded-full z-10">${card.rarity}</span>
+                        <div class="w-full z-10">
+                            <div class="text-base font-black drop-shadow mb-1">${card.name}</div>
+                        </div>
                     </div>
                 `;
             } else {
                 const visualContent = card.image 
-                    ? `<img src="${card.image}" class="w-24 h-24 object-contain mx-auto my-auto rounded-xl bg-white/20 p-1 z-10">`
-                    : `<div class="text-5xl my-auto bounce-animation z-10">${card.emoji}</div>`;
+                    ? `<img src="${card.image}" onerror="this.onerror=null; this.src='https://placehold.co/120x120/e2e8f0/475569?text=🖼️';" class="w-24 h-24 object-contain mx-auto my-auto rounded-xl bg-white/20 p-1 z-10 border border-white/30">`
+                    : `<div class="text-5xl my-auto bounce-animation z-10 drop-shadow-md">${card.emoji}</div>`;
 
                 cardContent = `
                     <div class="rounded-3xl p-4 border-4 shadow-xl text-center text-white relative overflow-hidden card-aspect w-52 sm:w-56 mx-auto flex flex-col justify-between items-center ${card.color}">
@@ -2027,7 +2084,7 @@
                         ${visualContent}
                         <div class="w-full z-10">
                             <div class="text-base font-black drop-shadow mb-1">${card.name}</div>
-                            <div class="text-[10px] font-bold bg-white/20 p-1.5 rounded-xl leading-tight">${card.desc}</div>
+                            <div class="text-[10px] font-bold bg-white/20 p-1.5 rounded-xl leading-tight border border-white/30">${card.desc}</div>
                         </div>
                     </div>
                 `;
